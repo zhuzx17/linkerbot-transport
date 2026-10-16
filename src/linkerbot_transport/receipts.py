@@ -9,6 +9,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
 
+from ._event_order import next_event_order
+
 
 class SendOutcome(str, Enum):
     """Terminal outcome of an accepted transport send."""
@@ -27,6 +29,7 @@ class SendResult:
     accepted_at_s: float
     claimed_at_s: float | None
     completed_at_s: float
+    claimed_order: int | None = None
 
     @property
     def queue_delay_s(self) -> float | None:
@@ -62,6 +65,7 @@ class SendReceipt(Future[SendResult]):
         self._generation = generation
         self._accepted_at_s = monotonic()
         self._claimed_at_s: float | None = None
+        self._claimed_order: int | None = None
         self._outcome: SendOutcome | None = None
         self._transition_lock = threading.RLock()
         self.set_running_or_notify_cancel()
@@ -91,6 +95,13 @@ class SendReceipt(Future[SendResult]):
 
         with self._transition_lock:
             return self._outcome
+
+    @property
+    def claimed_order(self) -> int | None:
+        """Process-local event order at claim, independent of clock precision."""
+
+        with self._transition_lock:
+            return self._claimed_order
 
     @classmethod
     def completed(
@@ -129,6 +140,7 @@ class SendReceipt(Future[SendResult]):
             if self.done():
                 return False
             if self._claimed_at_s is None:
+                self._claimed_order = next_event_order()
                 self._claimed_at_s = self._monotonic()
             return True
 
@@ -138,6 +150,7 @@ class SendReceipt(Future[SendResult]):
                 return False
             now = self._monotonic()
             if self._claimed_at_s is None:
+                self._claimed_order = next_event_order()
                 self._claimed_at_s = now
             self._outcome = SendOutcome.DISPATCHED
             self.set_result(
@@ -147,6 +160,7 @@ class SendReceipt(Future[SendResult]):
                     accepted_at_s=self._accepted_at_s,
                     claimed_at_s=self._claimed_at_s,
                     completed_at_s=now,
+                    claimed_order=self._claimed_order,
                 )
             )
             return True
