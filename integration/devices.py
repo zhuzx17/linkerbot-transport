@@ -173,6 +173,13 @@ class CANPeer:
                         if self.stop.is_set():
                             return
                 with self.lock:
+                    # A request may have passed the first check before a
+                    # response gate or another thread made this peer silent.
+                    # Share the setter's lock through the final check/send so
+                    # set_responding(False) also excludes in-flight replies.
+                    if not self.responding:
+                        self.dropped += 1
+                        continue
                     for response in self.wire.respond(message):
                         # Even the device-side model must fail with a bounded
                         # wait if a virtual recipient stops consuming.

@@ -140,25 +140,57 @@ def test_virtual_recipient_backpressure_is_local_to_one_arm_channel(four_devices
     survivors = tuple(name for name in rig.names if name != affected)
     rig.command_and_observe()
     rig.devices[affected].stop_polling()
-    # This extra virtual recipient has a one-frame receive queue and never
-    # consumes while commands run. python-can reports a real send error once
-    # it fills. This models virtual receiver backpressure, not SDK FIFO-full
-    # policy, a physical CAN bus-off, or a USB driver failure.
-    with can.Bus(
-        interface="virtual", channel=rig.channels[affected], rx_queue_size=1
-    ) as blocked:
-        with ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="joint-backpressure"
-        ) as pool:
-            writing = pool.submit(rig.devices[affected].set_velocities, [0.61] * 7)
-            rig.command_and_observe(survivors, round_number=1)
-            with pytest.raises(
-                ArmCANError, match="Could not send message to one or more recipients"
-            ):
-                writing.result(timeout=5)
-        rig.command_and_observe(survivors, round_number=2)
-        assert blocked.recv(timeout=0) is not None, (
-            "The bounded recipient was never filled"
-        )
+    # Checked writes use the polling FIFO and wait for physical dispatch. With
+    # the producer stopped, they drain older SDK frames before a bounded
+    # recipient could receive one and race with our deliberate queue fill.
+    rig.devices[affected].set_velocities([0.6] * 7)
+    peer = rig.peers[affected]
+    with can.Bus(interface="virtual", channel=rig.channels[affected]) as request_bus:
+        # Hold a real position request after the peer's first responding check.
+        # Stopping SDK polling alone does not drain requests already in flight.
+        peer.hold_next_reply(b"\x06")
+        try:
+            request = can.Message(
+                arbitration_id=peer.wire.motor_ids[0],
+                is_extended_id=False,
+                data=b"\x06",
+            )
+            request_bus.send(request, timeout=0.2)
+            assert peer.reply_held.wait(3), "The in-flight response was never held"
+            peer.set_responding(False)
+            # A bounded virtual recipient blocks SDK sends and device replies
+            # alike. Silence the peer before attaching it, including the held
+            # response, so this fault targets SDK sending rather than the model.
+            with can.Bus(
+                interface="virtual", channel=rig.channels[affected], rx_queue_size=1
+            ) as blocked:
+                request_bus.send(request, timeout=0.2)
+                before = peer.dropped
+                peer.reply_gate.set()
+                wait_until(
+                    lambda: peer.dropped > before or peer.errors,
+                    description="the held response suppressed before backpressure",
+                )
+                assert not peer.errors, peer.errors
+                # The queue is full before the real SDK writer starts. This
+                # models receiver backpressure, not SDK FIFO-full or bus-off.
+                with ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="joint-backpressure"
+                ) as pool:
+                    writing = pool.submit(
+                        rig.devices[affected].set_velocities, [0.61] * 7
+                    )
+                    rig.command_and_observe(survivors, round_number=1)
+                    with pytest.raises(
+                        ArmCANError,
+                        match="Could not send message to one or more recipients",
+                    ):
+                        writing.result(timeout=5)
+                rig.command_and_observe(survivors, round_number=2)
+                assert blocked.recv(timeout=0) is not None, (
+                    "The bounded recipient was never filled"
+                )
+        finally:
+            peer.reply_gate.set()
     rig.restart(affected)
     rig.command_and_observe(round_number=3)

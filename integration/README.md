@@ -54,10 +54,14 @@ bus peers, then checks that its worker threads have exited.
   another round, checking progress during the rebuild rather than only before
   and after it.
 - Send backpressure: add a bounded virtual recipient to one arm's channel and
-  leave its one-frame queue full. The real backend reports a send timeout while
-  the other three devices continue. Removing the blocked recipient and rebuilding
-  the affected arm restores four-device traffic. This does not model the SDK's
-  FIFO-full policy or physical bus-off.
+  leave its one-frame queue full. Before attaching it, stop polling and drain
+  older SDK sends through checked FIFO writes, then silence that channel's
+  device peer, including a deterministically held in-flight read response; the
+  bounded recipient would otherwise block the simulator's replies as well.
+  The real backend reports an SDK send timeout while the other three devices
+  continue. Removing the blocked recipient and rebuilding the affected arm
+  restores four-device traffic. This does not model the SDK's FIFO-full policy
+  or physical bus-off.
 - Device simulator failures propagate to pytest; teardown checks peer and SDK
   worker cleanup instead of leaving silent background failures.
 
