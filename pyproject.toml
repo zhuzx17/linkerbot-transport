@@ -40,7 +40,7 @@ dev = [
   "pre-commit>=4.0.0",
   "pytest>=9.1.1",
   "pytest-timeout>=2.4.0",
-  "ruff>=0.15.21",
+  "ruff==0.17.1",
   "ty>=0.0.58",
 ]
 
@@ -61,6 +61,7 @@ addopts = ["-ra", "--strict-markers"]
 markers = ["canfd: Tests for CAN FD communication"]
 
 [tool.ruff]
+extend-exclude = ["*.md"]
 target-version = "py310"
 line-length = 88
 
