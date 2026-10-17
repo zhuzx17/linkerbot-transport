@@ -61,12 +61,33 @@ bus peers, then checks that its worker threads have exited.
 - Device simulator failures propagate to pytest; teardown checks peer and SDK
   worker cleanup instead of leaving silent background failures.
 
-Every PR and `main` update runs this suite and the independent Hand/Arm offline
+Transport PRs and `main` updates run this suite and the independent Hand/Arm offline
 suites on Linux and Windows with Python 3.10/3.13. Weekly runs and manual
 `full_matrix=true` also cover 3.11/3.12. CI resolves all dependency refs to exact
 commits once per workflow, checks out the same group in every consumer job, and
 saves the source manifest alongside JUnit reports. Manual runs retain
 `dependency_owner`/`dependency_ref` and accept separate `hand_ref`/`arm_ref` values.
+
+## Shared CI entry point
+
+The Transport, Hand, and Arm workflows use the composite action at
+`.github/actions/four-devices/action.yml`. Check out the exact source revisions
+before invoking it. Supply `python-version`, `hand-path`, `arm-path`, and a unique
+`artifact-name`; `transport-path` defaults to `.`. All repository paths are
+relative to the calling workflow's workspace. An SDK workflow checks out
+Transport at `.ci/transport` and invokes
+`./.ci/transport/.github/actions/four-devices` with `transport-path: .ci/transport`.
+The selected Transport revision must contain this action.
+
+Hand and Arm PRs also run this suite, using the current workflow commit (the PR
+merge result) for the SDK under review. Transport and the other SDK are resolved
+once to exact commits shared by every integration job. The existing
+`dependency_owner`/`dependency_ref` manual inputs select those dependencies.
+
+The action installs from those checkouts, runs pytest from the Transport
+directory, and saves `reports/integration.xml` and a `transport`/`hand`/`arm` SHA
+manifest in the workspace root. Reports are uploaded even if a test fails and
+retained for 14 days. The action needs no secrets, write token, or physical bus.
 
 ## Limits
 

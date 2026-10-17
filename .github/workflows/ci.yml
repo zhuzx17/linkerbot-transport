@@ -383,63 +383,13 @@ jobs:
           repository: ${{ env.CI_DEPENDENCY_OWNER }}/linkerbot-arm-python-sdk
           path: .ci/arm
           ref: ${{ needs.resolve-consumers.outputs.arm_sha }}
-      - uses: actions/setup-python@v7
-        if: runner.os != 'Windows'
+      - uses: ./.github/actions/four-devices
         with:
           python-version: ${{ matrix.python }}
-      - name: Create isolated Python environment
-        if: runner.os != 'Windows'
-        run: |
-          python -m venv "$RUNNER_TEMP/ci-venv"
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            echo "$RUNNER_TEMP/ci-venv/Scripts" >> "$GITHUB_PATH"
-          else
-            echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
-          fi
-      - uses: mamba-org/setup-micromamba@v3
-        if: runner.os == 'Windows'
-        with:
-          environment-name: arm-ci
-          create-args: >-
-            python=${{ matrix.python }}
-            pinocchio=4.1.0
-            scipy
-            pip
-          init-shell: none
-          generate-run-shell: false
-          post-cleanup: all
-      - name: Record exact tested source revisions
-        run: |
-          mkdir -p reports
-          for repo in . .ci/hand .ci/arm; do
-            echo "$repo $(git -C "$repo" rev-parse HEAD)" | tee -a reports/source-revisions.txt
-          done
-      - name: Install the fixed Transport, Hand and Arm combination
-        run: |
-          python_command=(python)
-          arm_package='.ci/arm[kinetix]'
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            python_command=(micromamba run -n arm-ci python)
-            arm_package=.ci/arm
-          fi
-          "${python_command[@]}" -m pip install -r requirements/ci-test.txt
-          "${python_command[@]}" -m pip install '.[all]' .ci/hand "$arm_package"
-          "${python_command[@]}" -m pip check
-          "${python_command[@]}" -c 'import linkerbot_hand, linkerbot_arm, linkerbot_transport, pinocchio; print(pinocchio.__version__)'
-      - name: Four-channel cross-SDK offline integration tests
-        run: |
-          python_command=(python)
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            python_command=(micromamba run -n arm-ci python)
-          fi
-          "${python_command[@]}" -m pytest -p pytest_timeout --timeout=60 integration/tests --junitxml=reports/integration.xml
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: integration-${{ matrix.os }}-py${{ matrix.python }}
-          path: reports/
-          if-no-files-found: warn
-          retention-days: 14
+          transport-path: .
+          hand-path: .ci/hand
+          arm-path: .ci/arm
+          artifact-name: integration-${{ matrix.os }}-py${{ matrix.python }}
 
   ros-adapter:
     name: Arm ROS2 adapter compatibility
