@@ -445,17 +445,11 @@ def test_send_loop_does_not_busy_wait_by_default() -> None:
     by the *dispatcher* threads while idle (no work). With busy-wait, CPU time
     rises linearly with wall time; with the fix, it stays near zero.
     """
-    import os
-    import resource
-
     interface = FakeInterface()
     dispatcher = CANFDMessageDispatcher(interface=interface)
     try:
         wall_start = time.monotonic()
-        cpu_start = (
-            resource.getrusage(resource.RUSAGE_SELF).ru_utime
-            + resource.getrusage(resource.RUSAGE_SELF).ru_stime
-        )
+        cpu_start = time.process_time()
         # Send 100 frames; with busy-wait this would consume ~30 ms of CPU
         # time in spinning. With the fix, idle time dominates.
         message = CANFDMessage(arbitration_id=1, data=b"x")
@@ -463,10 +457,7 @@ def test_send_loop_does_not_busy_wait_by_default() -> None:
             dispatcher.send(message)
         wait_until(lambda: len(interface.sent) == 100, timeout_s=2.0)
         wall_elapsed = time.monotonic() - wall_start
-        cpu_elapsed = (
-            resource.getrusage(resource.RUSAGE_SELF).ru_utime
-            + resource.getrusage(resource.RUSAGE_SELF).ru_stime
-        ) - cpu_start
+        cpu_elapsed = time.process_time() - cpu_start
         # CPU/wall ratio caps the fraction of time we're not blocking. On a
         # busy machine the test sometimes sees CPU=wall due to other threads,
         # but the busy-wait bug specifically produced ratios > 0.8 on every
@@ -475,7 +466,6 @@ def test_send_loop_does_not_busy_wait_by_default() -> None:
             f"dispatcher consumed {cpu_elapsed:.3f}s CPU over {wall_elapsed:.3f}s "
             "wall — busy-wait may have returned"
         )
-        _ = os  # keep import used even if unused under future edits
     finally:
         dispatcher.stop()
 
