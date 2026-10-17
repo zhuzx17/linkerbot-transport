@@ -1,0 +1,103 @@
+name: Four-device SDK integration
+description: Run the shared two-hand and two-arm offline regression suite
+
+inputs:
+  python-version:
+    description: Python version used by the integration matrix
+    required: true
+  transport-path:
+    description: Workspace-relative checkout path of Transport and this suite
+    required: false
+    default: .
+  hand-path:
+    description: Workspace-relative checkout path of the Hand SDK
+    required: true
+  arm-path:
+    description: Workspace-relative checkout path of the Arm SDK
+    required: true
+  artifact-name:
+    description: Unique artifact name for this integration matrix job
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      if: runner.os != 'Windows'
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Create isolated Python environment
+      if: runner.os != 'Windows'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        python -m venv "$RUNNER_TEMP/ci-venv"
+        echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
+    - uses: mamba-org/setup-micromamba@v3
+      if: runner.os == 'Windows'
+      with:
+        environment-name: arm-ci
+        create-args: >-
+          python=${{ inputs.python-version }}
+          pinocchio=4.1.0
+          scipy
+          pip
+        init-shell: none
+        generate-run-shell: false
+        post-cleanup: all
+    - name: Record exact tested source revisions
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        TRANSPORT_PATH: ${{ inputs.transport-path }}
+        HAND_PATH: ${{ inputs.hand-path }}
+        ARM_PATH: ${{ inputs.arm-path }}
+      run: |
+        mkdir -p reports
+        : > reports/source-revisions.txt
+        for name in transport hand arm; do
+          case "$name" in
+            transport) repo="$TRANSPORT_PATH" ;;
+            hand) repo="$HAND_PATH" ;;
+            arm) repo="$ARM_PATH" ;;
+          esac
+          revision=$(git -C "$repo" rev-parse HEAD)
+          printf '%s %s\n' "$name" "$revision" | tee -a reports/source-revisions.txt
+        done
+    - name: Install the fixed Transport, Hand and Arm combination
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        TRANSPORT_PATH: ${{ inputs.transport-path }}
+        HAND_PATH: ${{ inputs.hand-path }}
+        ARM_PATH: ${{ inputs.arm-path }}
+      run: |
+        python_command=(python)
+        arm_package="./${ARM_PATH}[kinetix]"
+        if [[ "$RUNNER_OS" == Windows ]]; then
+          python_command=(micromamba run -n arm-ci python)
+          arm_package="./${ARM_PATH}"
+        fi
+        "${python_command[@]}" -m pip install -r "./${TRANSPORT_PATH}/requirements/ci-test.txt"
+        "${python_command[@]}" -m pip install "./${TRANSPORT_PATH}[all]" "./${HAND_PATH}" "$arm_package"
+        "${python_command[@]}" -m pip check
+        "${python_command[@]}" -c 'import linkerbot_hand, linkerbot_arm, linkerbot_transport, pinocchio; print(pinocchio.__version__)'
+    - name: Four-channel cross-SDK offline integration tests
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.transport-path }}
+      env:
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        JUNIT_PATH: ${{ github.workspace }}/reports/integration.xml
+      run: |
+        python_command=(python)
+        if [[ "$RUNNER_OS" == Windows ]]; then
+          python_command=(micromamba run -n arm-ci python)
+        fi
+        "${python_command[@]}" -m pytest -p pytest_timeout --timeout=60 integration/tests --junitxml="$JUNIT_PATH"
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ github.workspace }}/reports/
+        if-no-files-found: warn
+        retention-days: 14
