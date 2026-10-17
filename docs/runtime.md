@@ -87,6 +87,18 @@ per-generation sequence. A full inbox drops the newly received frame. Route
 misses, key errors, overflow, close drops and generation rejections are exposed
 through health metrics.
 
+Send receipts and results also expose optional `claimed_order` metadata, and
+routed frames expose optional `received_order`. These process-local event
+numbers distinguish events even when a low-resolution monotonic clock gives
+them the same timestamp. A frame belongs after a claim only when
+`received_order > claimed_order`. They are not timestamps, wire transaction
+identifiers, or counters that can be compared across processes. Keep checking
+the connection generation and the protocol response route as usual.
+
+Existing metadata constructors remain valid: the new fields default to `None`.
+Older or third-party transports that provide no event order still require the
+timestamp fallback; that fallback cannot distinguish equal-timestamp events.
+
 ## Health and generations
 
 `get_health()` is a cache-only operation. It reports connection state, generation,

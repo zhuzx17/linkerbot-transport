@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Generic, TypeVar
 
+from ._event_order import next_event_order
 from .errors import (
     ClosedError,
     DeviceNotReadyError,
@@ -57,6 +58,7 @@ class RoutedMessage(Generic[MessageT, RouteKeyT]):
     generation: int
     sequence: int
     received_at_s: float
+    received_order: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +465,7 @@ class ReceiveRouter(Generic[MessageT, RouteKeyT]):
             if not self._running or generation != self._generation:
                 self._stale_frames += 1
                 return False
+            received_order = next_event_order()
         try:
             route_key = self._key_of(message)
             _validate_hashable(route_key, "extracted route_key")
@@ -487,6 +490,7 @@ class ReceiveRouter(Generic[MessageT, RouteKeyT]):
                 generation=generation,
                 sequence=self._sequence,
                 received_at_s=self._monotonic(),
+                received_order=received_order,
             )
             result, became_available = state.offer(routed)
             if result is _OfferResult.ACCEPTED:
